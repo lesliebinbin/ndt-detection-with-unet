@@ -1,0 +1,70 @@
+[project]
+name = "dh-computer-vision"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydicom>=3.0.1",
+    "ipython",
+    "ipykernel",
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "tqdm",
+    "tensorboard",
+    "keras",
+    "keras-hub",
+    "scikit-learn",
+    "scikit-image",
+    "seaborn",
+    "tensorflow-cpu",
+    "jax[cuda12]",
+    "jupyter",
+    "openpyxl",
+    "sqlalchemy",
+    "apscheduler",
+    "psycopg2-binary",
+    "moviepy",
+    "opencv-python",
+    "opencv-contrib-python",
+
+]
+
+[tool.uv.sources]
+pydicom = [{ index = "simple" }]
+pycogpg2-binary = [{ index = "simple" }]
+apscheduler = [{ index = "simple" }]
+sqlalchemy = [{ index = "simple" }]
+openpyxl = [{ index = "simple" }]
+seaborn = [{ index = "simple"}]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+torchaudio = [{ index = "pytorch-cpu" }]
+ipython = [{ index = "simple" }]
+ipykernel = [{ index = "simple" }]
+numpy = [{ index = "simple" }]
+pandas = [{ index = "simple" }]
+matplotlib = [{ index = "simple" }]
+tqdm = [{ index = "simple" }]
+keras = [{ index = "simple" }]
+keras-hub = [{ index = "simple" }]
+keras-cv = [{ index = "simple" }]
+jax = [{ index = "simple" }]
+tensorflow-cpu = [{ index = "simple" }]
+scikit-learn = [{ index = "simple" }]
+
+[[tool.uv.index]]
+name = "simple"
+url = "https://pypi.org/simple"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = 'https://download.pytorch.org/whl/cpu'
+explicit = true
