@@ -33,6 +33,7 @@ def unet_model(
     output_channels=1,
     use_batch_norm=False,
     dropout_rate=0.5,
+    final_activation="sigmoid",
 ):
 
     inputs = keras.layers.Input(shape=input_shape)
@@ -69,7 +70,10 @@ def unet_model(
     x = keras.layers.UpSampling2D(size=(2, 2))(x)
 
     x = keras.layers.Conv2D(
-        filters=output_channels, kernel_size=3, padding="same", activation="sigmoid"
+        filters=output_channels,
+        kernel_size=3,
+        padding="same",
+        activation=final_activation,
     )(x)
 
     # s1 = encoder_block(inputs, 64, use_batch_norm=use_batch_norm)
