@@ -26,7 +26,7 @@ def _custom_crop_image(
     return img_background, mask_background
 
 
-def _preprocess_image_and_mask(img_file, mask_file):
+def _preprocess_image_and_mask(img_file, mask_file, target_size=None):
     img = cv2.imread(img_file, flags=cv2.IMREAD_GRAYSCALE)
     img = keras.ops.cast(img, "float32")
     mask = cv2.imread(mask_file, flags=cv2.IMREAD_GRAYSCALE)
@@ -35,6 +35,10 @@ def _preprocess_image_and_mask(img_file, mask_file):
         img = keras.ops.expand_dims(img, axis=-1)
     if mask.ndim == 2:
         mask = keras.ops.expand_dims(mask, axis=-1)
+    if target_size is not None:
+        img, mask = keras.ops.image.resize(
+            keras.ops.array([img, mask]), size=target_size
+        )
     return img, mask
 
 
@@ -238,11 +242,6 @@ def create_mask_dataset(
 
     def my_generator(img_folder, mask_folder, input_shape, train=False):
         input_height, input_width, _channel = input_shape
-        resize_and_pad_to_aspect_ratio = partial(
-            _resize_and_pad_to_aspect_ratio,
-            target_height=input_height,
-            target_width=input_width,
-        )
         if isinstance(img_folder, str):
             img_folder = Path(img_folder)
         if isinstance(mask_folder, str):
@@ -250,12 +249,10 @@ def create_mask_dataset(
 
         for img_file in img_folder.iterdir():
             mask_file = mask_folder / img_file.relative_to(img_folder)
-            img, mask = _preprocess_image_and_mask(img_file, mask_file)
-            yield keras.ops.image.resize(
-                img, size=(input_height, input_width), pad_to_aspect_ratio=True
-            ), keras.ops.image.resize(
-                mask, size=(input_height, input_width), pad_to_aspect_ratio=True
+            img, mask = _preprocess_image_and_mask(
+                img_file, mask_file, target_size=(input_height, input_width)
             )
+            yield img, mask
 
     return tf.data.Dataset.from_generator(
         lambda: my_generator(
