@@ -4,6 +4,7 @@ import traceback
 from apscheduler.schedulers.blocking import BlockingScheduler
 from datetime import datetime
 from apscheduler.executors.pool import ThreadPoolExecutor
+from pathlib import Path
 
 os.environ["KERAS_BACKEND"] = "jax"
 from workers import (
@@ -97,6 +98,14 @@ def save_result_to_db(result: pd.DataFrame, filtered_rows, sub_folder):
     )
 
 
+def translate_dataframe(df: pd.DataFrame, column_name: str, dictionary_map: dict):
+    def translate(line):
+        return ";".join([dictionary_map[word] for word in line.split(";")])
+
+    df[column_name] = df[column_name].apply(translate)
+    return df
+
+
 def process_folder(
     local_root_folder,
     remote_root_folder,
@@ -127,10 +136,24 @@ def process_folder(
                     src_folder=src_folder,
                 )
                 file = src_folder / "analysis_result.xlsx"
+                translation_map = json.loads(Path("labels_config.json").read_text())[
+                    "translation_map"
+                ]
                 with pd.ExcelWriter(file, engine="openpyxl") as writer:
                     result.to_excel(writer, index=False, sheet_name="full_result")
-                    result[filtered_rows].to_excel(
+                    result_en = translate_dataframe(
+                        result.copy(), "label", translation_map
+                    )
+                    result_en.to_excel(writer, index=False, sheet_name="full_result_en")
+                    filtered_result = result[filtered_rows]
+                    filtered_result.to_excel(
                         writer, index=False, sheet_name="filtered_result"
+                    )
+                    filtered_result_en = translate_dataframe(
+                        filtered_result.copy(), "label", translation_map
+                    )
+                    filtered_result_en.to_excel(
+                        writer, index=False, sheet_name="filtered_result_en"
                     )
                 save_result_to_db(result, filtered_rows, sub_folder)
                 sub_folder = SubFolder.update_status(sub_folder, Sess, WorkStatus.DONE)

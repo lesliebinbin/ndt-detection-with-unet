@@ -4,9 +4,91 @@ import numpy as np
 from PIL import Image
 import cv2
 import keras
+from functools import partial
 
 
-def create_mask_dataset(
+def _custom_crop_image(
+    origin_img,
+    origin_mask,
+    crop_x_min,
+    crop_x_max,
+    crop_y_min,
+    crop_y_max,
+):
+    img_background = np.zeros_like(origin_img)
+    mask_background = np.zeros_like(origin_mask)
+    img_background[crop_y_min:crop_y_max, crop_x_min:crop_x_max, :] = origin_img[
+        crop_y_min:crop_y_max, crop_x_min:crop_x_max, :
+    ]
+    mask_background[crop_y_min:crop_y_max, crop_x_min:crop_x_max, :] = origin_mask[
+        crop_y_min:crop_y_max, crop_x_min:crop_x_max, :
+    ]
+    return img_background, mask_background
+
+
+def _preprocess_image_and_mask(img_file, mask_file):
+    img = cv2.imread(img_file, flags=cv2.IMREAD_GRAYSCALE)
+    img = keras.ops.cast(img, "float32")
+    mask = cv2.imread(mask_file, flags=cv2.IMREAD_GRAYSCALE)
+    mask = keras.ops.cast(mask, "float32") / 255.0
+    if img.ndim == 2:
+        img = keras.ops.expand_dims(img, axis=-1)
+    if mask.ndim == 2:
+        mask = keras.ops.expand_dims(mask, axis=-1)
+    return img, mask
+
+
+def _crop_coordinates(mask):
+    img_height, img_width = mask.shape[:2]
+    y_coords, _x_coords, _z_coords = keras.ops.where(mask > 0)
+    if len(y_coords) > 0:
+        min_y, max_y = (
+            np.min(y_coords),
+            np.max(y_coords),
+        )
+        crop_x_min = 0
+        crop_x_max = img_width
+        crop_y_min = 0 if min_y == 0 else np.random.choice(range(0, min_y))
+        crop_y_max = (
+            img_height
+            if max_y + 1 == img_height
+            else np.random.choice(range(max_y + 1, img_height))
+        )
+        return crop_x_min, crop_x_max, crop_y_min, crop_y_max
+    return None
+
+
+def _random_crop_coordinates(mask):
+    height, width = mask.shape[:2]
+    crop_x_min, crop_x_max = 0, width
+    crop_height = np.random.choice(range(height // 2, height))
+    crop_center_y = height // 2
+    crop_y_min = crop_center_y - crop_height // 2
+    crop_y_max = crop_center_y + crop_height // 2
+    return crop_x_min, crop_x_max, crop_y_min, crop_y_max
+
+
+def _resize_and_pad_to_aspect_ratio(image_and_masks, target_height, target_width):
+    images_and_masks_arr = keras.ops.array(image_and_masks)
+    resized_images_and_masks = keras.ops.image.resize(
+        images_and_masks_arr,
+        size=(target_height, target_width),
+        pad_to_aspect_ratio=True,
+    )
+    reshaped_images_and_masks = keras.ops.reshape(
+        resized_images_and_masks, (-1, 2, *resized_images_and_masks.shape[1:])
+    )
+
+    return [
+        (image, mask)
+        for image, mask in zip(
+            reshaped_images_and_masks[:, 0, :, :, :],
+            reshaped_images_and_masks[:, 1, :, :, :],
+        )
+    ]
+
+
+def _create_mask_dataset(
     img_folder: Path | str,
     mask_folder: Path | str,
     input_shape=(512, 512, 1),
@@ -79,6 +161,116 @@ def create_mask_dataset(
     )
 
 
+def __create_mask_dataset(
+    img_folder: Path | str,
+    mask_folder: Path | str,
+    input_shape=(512, 512, 1),
+    train: bool = False,
+):
+
+    def my_generator(img_folder, mask_folder, input_shape, train=False):
+        input_height, input_width, _channel = input_shape
+        resize_and_pad_to_aspect_ratio = partial(
+            _resize_and_pad_to_aspect_ratio,
+            target_height=input_height,
+            target_width=input_width,
+        )
+        if isinstance(img_folder, str):
+            img_folder = Path(img_folder)
+        if isinstance(mask_folder, str):
+            mask_folder = Path(mask_folder)
+
+        for img_file in img_folder.iterdir():
+            data_to_yield = []
+            mask_file = mask_folder / img_file.relative_to(img_folder)
+            img, mask = _preprocess_image_and_mask(img_file, mask_file)
+            data_to_yield.extend([img, mask])
+
+            if train:
+                match _crop_coordinates(mask):
+                    case (crop_x_min, crop_x_max, crop_y_min, crop_y_max):
+                        data_to_yield.extend(
+                            _custom_crop_image(
+                                origin_img=img,
+                                origin_mask=mask,
+                                crop_x_min=crop_x_min,
+                                crop_x_max=crop_x_max,
+                                crop_y_min=crop_y_min,
+                                crop_y_max=crop_y_max,
+                            )
+                        )
+
+                crop_x_min, crop_x_max, crop_y_min, crop_y_max = (
+                    _random_crop_coordinates(mask)
+                )
+                data_to_yield.extend(
+                    _custom_crop_image(
+                        origin_img=img,
+                        origin_mask=mask,
+                        crop_x_min=crop_x_min,
+                        crop_x_max=crop_x_max,
+                        crop_y_min=crop_y_min,
+                        crop_y_max=crop_y_max,
+                    )
+                )
+            yield from resize_and_pad_to_aspect_ratio(data_to_yield)
+
+    return tf.data.Dataset.from_generator(
+        lambda: my_generator(
+            img_folder=img_folder,
+            mask_folder=mask_folder,
+            input_shape=input_shape,
+            train=train,
+        ),
+        output_signature=(
+            tf.TensorSpec(shape=input_shape, name="image", dtype="float32"),
+            tf.TensorSpec(shape=input_shape, name="mask", dtype="float32"),
+        ),
+    )
+
+
+def create_mask_dataset(
+    img_folder: Path | str,
+    mask_folder: Path | str,
+    input_shape=(512, 512, 1),
+    train: bool = False,
+):
+
+    def my_generator(img_folder, mask_folder, input_shape, train=False):
+        input_height, input_width, _channel = input_shape
+        resize_and_pad_to_aspect_ratio = partial(
+            _resize_and_pad_to_aspect_ratio,
+            target_height=input_height,
+            target_width=input_width,
+        )
+        if isinstance(img_folder, str):
+            img_folder = Path(img_folder)
+        if isinstance(mask_folder, str):
+            mask_folder = Path(mask_folder)
+
+        for img_file in img_folder.iterdir():
+            mask_file = mask_folder / img_file.relative_to(img_folder)
+            img, mask = _preprocess_image_and_mask(img_file, mask_file)
+            yield keras.ops.image.resize(
+                img, size=(input_height, input_width), pad_to_aspect_ratio=True
+            ), keras.ops.image.resize(
+                mask, size=(input_height, input_width), pad_to_aspect_ratio=True
+            )
+
+    return tf.data.Dataset.from_generator(
+        lambda: my_generator(
+            img_folder=img_folder,
+            mask_folder=mask_folder,
+            input_shape=input_shape,
+            train=train,
+        ),
+        output_signature=(
+            tf.TensorSpec(shape=input_shape, name="image", dtype="float32"),
+            tf.TensorSpec(shape=input_shape, name="mask", dtype="float32"),
+        ),
+    )
+
+
 def create_dataset(folder_path: Path | str, num_classes: int, train: bool = False):
     def my_generator(folder_path, augumentation_operations):
         if isinstance(folder_path, str):
@@ -107,7 +299,8 @@ def create_dataset(folder_path: Path | str, num_classes: int, train: bool = Fals
 
     return tf.data.Dataset.from_generator(
         lambda: my_generator(
-            folder_path=folder_path, augumentation_operations=operations
+            folder_path=folder_path,
+            augumentation_operations=operations,
         ),
         # output_shapes=((512, 512, 1), (num_classes,)),
         # output_types=(tf.float32, tf.float32),

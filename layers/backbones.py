@@ -101,6 +101,8 @@ class UnetBackbone(keras.Model):
             UpScalingLayer(conv_filter) for conv_filter in self.general_filters
         ]
         self.dropout = dropout
+        self.upscaling_dropout = keras.layers.Dropout(self.dropout)
+        self.downscaling_dropout = keras.layers.Dropout(self.dropout)
 
     def get_config(self):
         config = super().get_config()
@@ -122,8 +124,8 @@ class UnetBackbone(keras.Model):
         ):
             up_layer.ds_block = x
             x = downscaling_layer(x)
-        x = keras.layers.Dropout(self.dropout)(x)
+        x = self.downscaling_dropout(x)
         for upscaling_layer in self.upscaling_layers[::-1]:
             x = upscaling_layer(x)
-        x = keras.layers.Dropout(self.dropout)(x)
+        x = self.upscaling_dropout(x)
         return x
