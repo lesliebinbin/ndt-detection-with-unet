@@ -165,6 +165,53 @@ def _create_mask_dataset(
     )
 
 
+def calculate_coordinates(height, width, target_width, step, random_walk=False):
+    coordinates = []
+    if not random_walk:
+        start_width = 0
+        while start_width + target_width < width:
+            min_x, min_y, max_x, max_y = (
+                start_width,
+                0,
+                start_width + target_width,
+                height,
+            )
+            coordinates.append([min_x, min_y, max_x, max_y])
+            start_width += step
+        coordinates.append([width - target_width, 0, width, height])
+    else:
+        start_width, end_width = (
+            height // 2,
+            width - height // 2,
+        )
+        width_centers = np.random.choice(
+            range(start_width, end_width),
+            replace=False,
+            size=(width - height) // step,
+        )
+        for width_center in width_centers:
+            min_x, min_y, max_x, max_y = (
+                width_center - height // 2,
+                0,
+                width_center + height // 2,
+                height,
+            )
+            coordinates.append([min_x, min_y, max_x, max_y])
+    return coordinates
+
+
+def img_and_mask_slice(img, mask, coordinates):
+    if img.ndim == 2:
+        img = keras.ops.expand_dims(img, axis=-1)
+    if mask.ndim == 2:
+        mask = keras.ops.expand_dims(mask, axis=-1)
+
+    return [
+        (img[min_y:max_y, min_x:max_x, :], mask[min_y:max_y, min_x:max_x, :])
+        for (min_x, min_y, max_x, max_y) in coordinates
+    ]
+
+
 def create_mask_slices_dataset(
     img_folder: Path | str,
     mask_folder: Path | str,
@@ -202,44 +249,23 @@ def create_mask_slices_dataset(
                 / 255.0
             )
             step = int(step_factor * resized_height)
-            # if train:
-            #     start_width, end_width = (
-            #         resized_height // 2,
-            #         resized_width - resized_height // 2,
-            #     )
-            #     width_centers = np.random.choice(
-            #         range(start_width, end_width),
-            #         replace=False,
-            #         size=(resized_width - resized_height) // step,
-            #     )
-            #     for width_center in width_centers:
-            #         min_x, min_y, max_x, max_y = (
-            #             width_center - resized_height // 2,
-            #             0,
-            #             width_center + resized_height // 2,
-            #             resized_height,
-            #         )
-            #         coordinates.append([min_x, min_y, max_x, max_y])
-            start_width = 0
-            while start_width + resized_height < resized_width:
-                min_x, min_y, max_x, max_y = (
-                    start_width,
-                    0,
-                    start_width + resized_height,
-                    resized_height,
+            if train:
+                coordinates.extend(
+                    calculate_coordinates(
+                        resized_height,
+                        resized_width,
+                        target_width,
+                        step=step,
+                        random_walk=True,
+                    )
                 )
-                coordinates.append([min_x, min_y, max_x, max_y])
-                start_width += step
-            coordinates.append(
-                [resized_width - resized_height, 0, resized_width, resized_height]
+            coordinates.extend(
+                calculate_coordinates(
+                    resized_height, resized_width, target_width, step=step
+                )
             )
 
-            for min_x, min_y, max_x, max_y in coordinates:
-                target_img = img[min_y:max_y, min_x:max_x]
-                target_mask = mask[min_y:max_y, min_x:max_x]
-                target_img = keras.ops.expand_dims(target_img, axis=-1)
-                target_mask = keras.ops.expand_dims(target_mask, axis=-1)
-                yield target_img, target_mask
+            yield from img_and_mask_slice(img, mask, coordinates)
 
     return tf.data.Dataset.from_generator(
         lambda: my_generator(
