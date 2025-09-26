@@ -165,6 +165,7 @@ def process_folder(
                 )
 
 
+
 def execute():
     model_path = "models/resnet18_best.keras"
     with open("workers/parent_folders.yml", "r") as f:
@@ -175,20 +176,20 @@ def execute():
 
     labels_config = {int(k): v for k, v in labels_config.items()}
 
-    remote_template = config["remote_template"]
 
     for root_folder in config["root_folders"]:
         local_root_folder = root_folder["local"]
         remote_root_folder = root_folder["remote"]
+        remote_template = root_folder['remote_template']
 
-    process_folder(
-        local_root_folder=local_root_folder,
-        remote_root_folder=remote_root_folder,
-        remote_template=remote_template,
-        callback=callback_func,
-        model_path=model_path,
-        labels_config=labels_config,
-    )
+        process_folder(
+            local_root_folder=local_root_folder,
+            remote_root_folder=remote_root_folder,
+            remote_template=remote_template,
+            callback=callback_func,
+            model_path=model_path,
+            labels_config=labels_config,
+        )
 
 
 def main():
