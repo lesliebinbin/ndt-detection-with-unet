@@ -165,6 +165,97 @@ def _create_mask_dataset(
     )
 
 
+def create_mask_slices_dataset(
+    img_folder: Path | str,
+    mask_folder: Path | str,
+    input_shape=(512, 512, 1),
+    step_factor=0.25,
+    train: bool = False,
+):
+
+    def my_generator(img_folder, mask_folder, input_shape, step_factor, train=False):
+        target_height, target_width, _channel = input_shape
+        if isinstance(img_folder, str):
+            img_folder = Path(img_folder)
+        if isinstance(mask_folder, str):
+            mask_folder = Path(mask_folder)
+        for img_file in img_folder.iterdir():
+            coordinates = []
+            mask_file = mask_folder / img_file.relative_to(img_folder)
+            img = cv2.imread(img_file, flags=cv2.IMREAD_GRAYSCALE)
+            mask = cv2.imread(mask_file, flags=cv2.IMREAD_GRAYSCALE)
+            height, width = img.shape
+            if height > width:
+                img = img.T
+                mask = mask.T
+                height, width = width, height
+            resized_height = target_height
+            scale_factor = resized_height / height
+            resized_width = int(width * scale_factor)
+            img = cv2.resize(img, dsize=(resized_width, resized_height)).astype(
+                "float32"
+            )
+            mask = (
+                cv2.resize(mask, dsize=(resized_width, resized_height)).astype(
+                    "float32"
+                )
+                / 255.0
+            )
+            step = int(step_factor * resized_height)
+            # if train:
+            #     start_width, end_width = (
+            #         resized_height // 2,
+            #         resized_width - resized_height // 2,
+            #     )
+            #     width_centers = np.random.choice(
+            #         range(start_width, end_width),
+            #         replace=False,
+            #         size=(resized_width - resized_height) // step,
+            #     )
+            #     for width_center in width_centers:
+            #         min_x, min_y, max_x, max_y = (
+            #             width_center - resized_height // 2,
+            #             0,
+            #             width_center + resized_height // 2,
+            #             resized_height,
+            #         )
+            #         coordinates.append([min_x, min_y, max_x, max_y])
+            start_width = 0
+            while start_width + resized_height < resized_width:
+                min_x, min_y, max_x, max_y = (
+                    start_width,
+                    0,
+                    start_width + resized_height,
+                    resized_height,
+                )
+                coordinates.append([min_x, min_y, max_x, max_y])
+                start_width += step
+            coordinates.append(
+                [resized_width - resized_height, 0, resized_width, resized_height]
+            )
+
+            for min_x, min_y, max_x, max_y in coordinates:
+                target_img = img[min_y:max_y, min_x:max_x]
+                target_mask = mask[min_y:max_y, min_x:max_x]
+                target_img = keras.ops.expand_dims(target_img, axis=-1)
+                target_mask = keras.ops.expand_dims(target_mask, axis=-1)
+                yield target_img, target_mask
+
+    return tf.data.Dataset.from_generator(
+        lambda: my_generator(
+            img_folder=img_folder,
+            mask_folder=mask_folder,
+            input_shape=input_shape,
+            step_factor=step_factor,
+            train=train,
+        ),
+        output_signature=(
+            tf.TensorSpec(shape=input_shape, name="image", dtype="float32"),
+            tf.TensorSpec(shape=input_shape, name="mask", dtype="float32"),
+        ),
+    )
+
+
 def __create_mask_dataset(
     img_folder: Path | str,
     mask_folder: Path | str,

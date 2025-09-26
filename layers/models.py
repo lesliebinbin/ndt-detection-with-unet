@@ -69,6 +69,7 @@ def unet_model(
 
     x = keras.layers.Dropout(rate=dropout_rate)(upscaling_blocks[-1])
     x = keras.layers.UpSampling2D(size=(2, 2))(x)
+    x = keras.layers.Activation("relu")(x)
 
     x = keras.layers.Conv2D(
         filters=output_channels,
