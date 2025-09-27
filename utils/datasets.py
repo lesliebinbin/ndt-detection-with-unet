@@ -26,7 +26,9 @@ def _custom_crop_image(
     return img_background, mask_background
 
 
-def _preprocess_image_and_mask(img_file, mask_file, target_size=None):
+def _preprocess_image_and_mask(
+    img_file, mask_file, target_size=None, train=False, transforms=None
+):
     img = cv2.imread(img_file, flags=cv2.IMREAD_GRAYSCALE)
     img = keras.ops.cast(img, "float32")
     mask = cv2.imread(mask_file, flags=cv2.IMREAD_GRAYSCALE)
@@ -35,9 +37,13 @@ def _preprocess_image_and_mask(img_file, mask_file, target_size=None):
         img = keras.ops.expand_dims(img, axis=-1)
     if mask.ndim == 2:
         mask = keras.ops.expand_dims(mask, axis=-1)
+    if train and transforms:
+        for transform in transforms:
+            _transform = transform.get_random_transformation(img)
+            img = transform.transform_images(img, _transform)
     if target_size is not None:
         img, mask = keras.ops.image.resize(
-            keras.ops.array([img, mask]), size=target_size
+            keras.ops.array([img, mask]), size=target_size, pad_to_aspect_ratio=True
         )
     return img, mask
 
@@ -202,37 +208,38 @@ def create_mask_slices_dataset(
                 / 255.0
             )
             step = int(step_factor * resized_height)
-            # if train:
-            #     start_width, end_width = (
-            #         resized_height // 2,
-            #         resized_width - resized_height // 2,
-            #     )
-            #     width_centers = np.random.choice(
-            #         range(start_width, end_width),
-            #         replace=False,
-            #         size=(resized_width - resized_height) // step,
-            #     )
-            #     for width_center in width_centers:
-            #         min_x, min_y, max_x, max_y = (
-            #             width_center - resized_height // 2,
-            #             0,
-            #             width_center + resized_height // 2,
-            #             resized_height,
-            #         )
-            #         coordinates.append([min_x, min_y, max_x, max_y])
-            start_width = 0
-            while start_width + resized_height < resized_width:
-                min_x, min_y, max_x, max_y = (
-                    start_width,
-                    0,
-                    start_width + resized_height,
-                    resized_height,
+            if train:
+                train_start_width, train_end_width = (
+                    resized_height // 2,
+                    resized_width - resized_height // 2,
                 )
-                coordinates.append([min_x, min_y, max_x, max_y])
-                start_width += step
-            coordinates.append(
-                [resized_width - resized_height, 0, resized_width, resized_height]
-            )
+                width_centers = np.random.choice(
+                    range(train_start_width, train_end_width),
+                    replace=False,
+                    size=(resized_width - resized_height) // step,
+                )
+                for width_center in width_centers:
+                    min_x, min_y, max_x, max_y = (
+                        width_center - resized_height // 2,
+                        0,
+                        width_center + resized_height // 2,
+                        resized_height,
+                    )
+                    coordinates.append([min_x, min_y, max_x, max_y])
+            else:
+                start_width = 0
+                while start_width + resized_height < resized_width:
+                    min_x, min_y, max_x, max_y = (
+                        start_width,
+                        0,
+                        start_width + resized_height,
+                        resized_height,
+                    )
+                    coordinates.append([min_x, min_y, max_x, max_y])
+                    start_width += step
+                coordinates.append(
+                    [resized_width - resized_height, 0, resized_width, resized_height]
+                )
 
             for min_x, min_y, max_x, max_y in coordinates:
                 target_img = img[min_y:max_y, min_x:max_x]
@@ -329,9 +336,12 @@ def create_mask_dataset(
     mask_folder: Path | str,
     input_shape=(512, 512, 1),
     train: bool = False,
+    transforms=None,
 ):
 
-    def my_generator(img_folder, mask_folder, input_shape, train=False):
+    def my_generator(
+        img_folder, mask_folder, input_shape, train=False, transforms=None
+    ):
         input_height, input_width, _channel = input_shape
         if isinstance(img_folder, str):
             img_folder = Path(img_folder)
@@ -341,7 +351,11 @@ def create_mask_dataset(
         for img_file in img_folder.iterdir():
             mask_file = mask_folder / img_file.relative_to(img_folder)
             img, mask = _preprocess_image_and_mask(
-                img_file, mask_file, target_size=(input_height, input_width)
+                img_file,
+                mask_file,
+                target_size=(input_height, input_width),
+                train=train,
+                transforms=transforms,
             )
             yield img, mask
 
@@ -351,6 +365,7 @@ def create_mask_dataset(
             mask_folder=mask_folder,
             input_shape=input_shape,
             train=train,
+            transforms=transforms,
         ),
         output_signature=(
             tf.TensorSpec(shape=input_shape, name="image", dtype="float32"),
