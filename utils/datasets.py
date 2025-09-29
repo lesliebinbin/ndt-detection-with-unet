@@ -41,7 +41,6 @@ def _preprocess_image_and_mask(img, mask, target_size=None, transform=None):
     if target_size is not None:
         img, mask = keras.ops.image.resize(
             keras.ops.array([img, mask]), size=target_size, pad_to_aspect_ratio=True
-            keras.ops.array([img, mask]), size=target_size, pad_to_aspect_ratio=True
         )
     return img, mask
 
@@ -284,7 +283,6 @@ def create_mask_dataset(
     mask_folder: Path | str,
     input_shape=(512, 512, 1),
     train: bool = False,
-    transforms=None,
     transforms=None,
 ):
     if isinstance(img_folder, str):
