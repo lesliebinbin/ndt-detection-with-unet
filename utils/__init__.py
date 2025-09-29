@@ -7,7 +7,13 @@ from .extract_coords import (
     rotate_normalized_coords,
     calculate_overlap,
 )
-from .datasets import create_dataset, create_images_dataset, create_mask_dataset, create_mask_slices_dataset
+from .datasets import (
+    create_dataset,
+    create_images_dataset,
+    create_mask_dataset,
+    create_mask_slices_dataset,
+    create_replicated_img_dataset,
+)
 from .image_crop import (
     remove_white_theshold,
     extract_windowed_region,

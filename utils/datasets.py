@@ -26,18 +26,21 @@ def _custom_crop_image(
     return img_background, mask_background
 
 
-def _preprocess_image_and_mask(img_file, mask_file, target_size=None):
-    img = cv2.imread(img_file, flags=cv2.IMREAD_GRAYSCALE)
-    img = keras.ops.cast(img, "float32")
-    mask = cv2.imread(mask_file, flags=cv2.IMREAD_GRAYSCALE)
-    mask = keras.ops.cast(mask, "float32") / 255.0
-    if img.ndim == 2:
-        img = keras.ops.expand_dims(img, axis=-1)
-    if mask.ndim == 2:
-        mask = keras.ops.expand_dims(mask, axis=-1)
+def _preprocess_image_and_mask(img, mask, target_size=None, transform=None):
+    if transform is not None:
+        _transform = transform.get_random_transformation(img)
+        transformed_img = transform.transform_images(img, _transform)
+        transformed_mask = transform.transform_images(mask, _transform)
+        if transformed_img.ndim > img.ndim:
+            transformed_img = transformed_img[0]
+        if transformed_mask.ndim > mask.ndim:
+            transformed_mask = transformed_mask[0]
+        img, mask = transformed_img, transformed_mask
+    if mask.max() > 1.0:
+        mask = mask / 255.0
     if target_size is not None:
         img, mask = keras.ops.image.resize(
-            keras.ops.array([img, mask]), size=target_size
+            keras.ops.array([img, mask]), size=target_size, pad_to_aspect_ratio=True
         )
     return img, mask
 
@@ -62,11 +65,20 @@ def _crop_coordinates(mask):
     return None
 
 
-def _random_crop_coordinates(mask):
+def _random_crop_coordinates(mask, preserve_height=False, preserve_width=False):
     height, width = mask.shape[:2]
-    crop_x_min, crop_x_max = 0, width
-    crop_height = np.random.choice(range(height // 2, height))
+    if preserve_height:
+        crop_height = height
+    else:
+        crop_height = np.random.choice(range(height // 2, height))
+    if preserve_width:
+        crop_width = width
+    else:
+        crop_width = np.random.choice(range(width // 2, width))
     crop_center_y = height // 2
+    crop_center_x = width // 2
+    crop_x_min = crop_center_x - crop_width // 2
+    crop_x_max = crop_center_x + crop_width // 2
     crop_y_min = crop_center_y - crop_height // 2
     crop_y_max = crop_center_y + crop_height // 2
     return crop_x_min, crop_x_max, crop_y_min, crop_y_max
@@ -92,71 +104,55 @@ def _resize_and_pad_to_aspect_ratio(image_and_masks, target_height, target_width
     ]
 
 
-def _create_mask_dataset(
+def _replicate_img_and_mask(img, mask, target_shape=None):
+    height, width = img.shape
+    if height > width:
+        img = img.T
+        mask = mask.T
+        height, width = width, height
+    img_background = np.zeros(shape=(width, width), dtype=img.dtype)
+    mask_background = np.zeros(shape=(width, width), dtype=mask.dtype)
+    start_index = 0
+    while start_index + height < width:
+        img_background[start_index : start_index + height, :] = img
+        mask_background[start_index : start_index + height, :] = mask
+        start_index += height
+    if start_index < width:
+        img_background[start_index:width, :] = img[0 : (width - start_index), :]
+        mask_background[start_index:width, :] = mask[0 : (width - start_index), :]
+    img_background = keras.ops.expand_dims(img_background, axis=-1)
+    mask_background = keras.ops.expand_dims(mask_background, axis=-1)
+    replicated_img = keras.ops.cast(img_background, "float32")
+    replicated_mask = keras.ops.cast(mask_background, "float32") / 255.0
+    if target_shape is not None:
+        replicated_img, replicated_mask = keras.ops.image.resize(
+            keras.ops.array([replicated_img, replicated_mask]), size=target_shape
+        )
+    return replicated_img, replicated_mask
+
+
+def create_replicated_img_dataset(
     img_folder: Path | str,
     mask_folder: Path | str,
     input_shape=(512, 512, 1),
-    train: bool = False,
 ):
-    def my_generator(img_folder, mask_folder, input_shape, train=False):
-        crop_factors = [1 / 9.0, 1 / 8.0, 1 / 8.0, 1 / 6.0, 1 / 5.0]
+    def my_generator(img_folder, mask_folder, input_shape):
         height, width, _channel = input_shape
         if isinstance(img_folder, str):
             img_folder = Path(img_folder)
         if isinstance(mask_folder, str):
             mask_folder = Path(mask_folder)
-
         for img_file in img_folder.iterdir():
-            img = cv2.imread(img_file, flags=cv2.IMREAD_GRAYSCALE)
-            img = keras.ops.cast(img, "float32")
             mask_file = mask_folder / img_file.relative_to(img_folder)
+            img = cv2.imread(img_file, flags=cv2.IMREAD_GRAYSCALE)
             mask = cv2.imread(mask_file, flags=cv2.IMREAD_GRAYSCALE)
-            mask = keras.ops.cast(mask, "float32")
-            if img.ndim == 2:
-                img = keras.ops.expand_dims(img, axis=-1)
-            if mask.ndim == 2:
-                mask = keras.ops.expand_dims(mask, axis=-1)
-            img = keras.ops.image.resize(
-                img, size=(height, width), pad_to_aspect_ratio=True
-            )
-            mask = keras.ops.image.resize(
-                mask, size=(height, width), pad_to_aspect_ratio=True
-            )
-            mask = mask / 255.0
-            yield img, mask
-            if train:
-                img_background = np.zeros_like(img)
-                mask_background = np.zeros_like(mask)
-                for crop_factor in crop_factors:
-                    min_y, max_y = (
-                        int(height * crop_factor),
-                        int(height * (1 - crop_factor)),
-                    )
-                    img_background[min_y:max_y, 0:width, :] = img[
-                        min_y:max_y, 0:width, :
-                    ]
-                    mask_background[min_y:max_y, 0:width, :] = mask[
-                        min_y:max_y, 0:width, :
-                    ]
-                    yield img_background, mask_background
-                    # cropped_img = keras.ops.image.resize(
-                    #     img[min_y:max_y, min_x:max_x, :],
-                    #     size=(height, width),
-                    #     pad_to_aspect_ratio=True,
-                    # )
-                    # cropped_mask = keras.ops.image.resize(
-                    #     mask[min_y:max_y, min_x:max_x, :],
-                    #     size=(height, width),
-                    #     pad_to_aspect_ratio=True,
-                    # )
-                    # yield cropped_img, cropped_mask
+            yield _replicate_img_and_mask(img, mask, (height, width))
 
     return tf.data.Dataset.from_generator(
         lambda: my_generator(
             img_folder=img_folder,
             mask_folder=mask_folder,
             input_shape=input_shape,
-            train=train,
         ),
         output_signature=(
             tf.TensorSpec(shape=input_shape, name="image", dtype="float32"),
@@ -282,102 +278,73 @@ def create_mask_slices_dataset(
     )
 
 
-def __create_mask_dataset(
-    img_folder: Path | str,
-    mask_folder: Path | str,
-    input_shape=(512, 512, 1),
-    train: bool = False,
-):
-
-    def my_generator(img_folder, mask_folder, input_shape, train=False):
-        input_height, input_width, _channel = input_shape
-        resize_and_pad_to_aspect_ratio = partial(
-            _resize_and_pad_to_aspect_ratio,
-            target_height=input_height,
-            target_width=input_width,
-        )
-        if isinstance(img_folder, str):
-            img_folder = Path(img_folder)
-        if isinstance(mask_folder, str):
-            mask_folder = Path(mask_folder)
-
-        for img_file in img_folder.iterdir():
-            data_to_yield = []
-            mask_file = mask_folder / img_file.relative_to(img_folder)
-            img, mask = _preprocess_image_and_mask(img_file, mask_file)
-            data_to_yield.extend([img, mask])
-
-            if train:
-                match _crop_coordinates(mask):
-                    case (crop_x_min, crop_x_max, crop_y_min, crop_y_max):
-                        data_to_yield.extend(
-                            _custom_crop_image(
-                                origin_img=img,
-                                origin_mask=mask,
-                                crop_x_min=crop_x_min,
-                                crop_x_max=crop_x_max,
-                                crop_y_min=crop_y_min,
-                                crop_y_max=crop_y_max,
-                            )
-                        )
-
-                crop_x_min, crop_x_max, crop_y_min, crop_y_max = (
-                    _random_crop_coordinates(mask)
-                )
-                data_to_yield.extend(
-                    _custom_crop_image(
-                        origin_img=img,
-                        origin_mask=mask,
-                        crop_x_min=crop_x_min,
-                        crop_x_max=crop_x_max,
-                        crop_y_min=crop_y_min,
-                        crop_y_max=crop_y_max,
-                    )
-                )
-            yield from resize_and_pad_to_aspect_ratio(data_to_yield)
-
-    return tf.data.Dataset.from_generator(
-        lambda: my_generator(
-            img_folder=img_folder,
-            mask_folder=mask_folder,
-            input_shape=input_shape,
-            train=train,
-        ),
-        output_signature=(
-            tf.TensorSpec(shape=input_shape, name="image", dtype="float32"),
-            tf.TensorSpec(shape=input_shape, name="mask", dtype="float32"),
-        ),
-    )
-
-
 def create_mask_dataset(
     img_folder: Path | str,
     mask_folder: Path | str,
     input_shape=(512, 512, 1),
     train: bool = False,
+    transforms=None,
 ):
+    if isinstance(img_folder, str):
+        img_folder = Path(img_folder)
+    if isinstance(mask_folder, str):
+        mask_folder = Path(mask_folder)
 
-    def my_generator(img_folder, mask_folder, input_shape, train=False):
+    def my_generator():
         input_height, input_width, _channel = input_shape
-        if isinstance(img_folder, str):
-            img_folder = Path(img_folder)
-        if isinstance(mask_folder, str):
-            mask_folder = Path(mask_folder)
 
         for img_file in img_folder.iterdir():
             mask_file = mask_folder / img_file.relative_to(img_folder)
-            img, mask = _preprocess_image_and_mask(
-                img_file, mask_file, target_size=(input_height, input_width)
+            origin_img, origin_mask = cv2.imread(
+                img_file, flags=cv2.IMREAD_GRAYSCALE
+            ).astype("float32"), cv2.imread(
+                mask_file, flags=cv2.IMREAD_GRAYSCALE
+            ).astype(
+                "float32"
             )
-            yield img, mask
+            origin_img = keras.ops.expand_dims(origin_img, axis=-1)
+            origin_mask = keras.ops.expand_dims(origin_mask, axis=-1)
+            yield _preprocess_image_and_mask(
+                origin_img, origin_mask, target_size=(input_height, input_width)
+            )
+
+            if train and transforms:
+                for transform in transforms:
+                    yield _preprocess_image_and_mask(
+                        origin_img,
+                        origin_mask,
+                        target_size=(input_height, input_width),
+                        transform=transform,
+                    )
+                    extra_to_yield = [
+                        (
+                            origin_img[:, ::-1, :],
+                            origin_mask[:, ::-1, :],
+                        ),
+                        (
+                            origin_img[::-1, :, :],
+                            origin_mask[::-1, :, :],
+                        ),
+                        (
+                            origin_img[::-1, ::-1, :],
+                            origin_mask[::-1, ::-1, :],
+                        ),
+                    ]
+                    for extra_img, extra_mask in extra_to_yield:
+                        yield _preprocess_image_and_mask(
+                            extra_img,
+                            extra_mask,
+                            target_size=(input_height, input_width),
+                        )
+                        yield _preprocess_image_and_mask(
+                            extra_img,
+                            extra_mask,
+                            target_size=(input_height, input_width),
+                            transform=transform,
+                        )
 
     return tf.data.Dataset.from_generator(
-        lambda: my_generator(
-            img_folder=img_folder,
-            mask_folder=mask_folder,
-            input_shape=input_shape,
-            train=train,
-        ),
+        my_generator,
         output_signature=(
             tf.TensorSpec(shape=input_shape, name="image", dtype="float32"),
             tf.TensorSpec(shape=input_shape, name="mask", dtype="float32"),
