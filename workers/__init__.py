@@ -111,4 +111,4 @@ def aggregate_batches(src_folder: Path, batch_prefix: str, result_filename=None)
     return df
 
 
-from .models import RootFolder, SubFolder, Sess, engine, Base, WorkStatus
+from .models import RootFolder, SubFolder, Sess, engine, Base, WorkStatus, ClassificationResult

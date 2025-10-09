@@ -15,6 +15,7 @@ from workers import (
     RootFolder,
     SubFolder,
     WorkStatus,
+    ClassificationResult,
 )
 import yaml
 from pathlib import Path
@@ -46,7 +47,7 @@ def generate_remote_url(df, remote_template, remote_prefix, src_folder):
     return df
 
 
-def should_process(local_root_folder, src_folder):
+def should_process(local_root_folder, src_folder, doc_count=None):
     root_path = str(local_root_folder)
     src_folder_path = str(src_folder)
     with Sess() as session:
@@ -81,6 +82,14 @@ def should_process(local_root_folder, src_folder):
             return sub_folder
         if sub_folder.status == WorkStatus.FAILED:
             return sub_folder
+        if doc_count is not None:
+            current_count = (
+                session.query(ClassificationResult)
+                .filter_by(sub_folder_id=sub_folder.id)
+                .count()
+            )
+            if current_count < doc_count:
+                return sub_folder
         return None
 
 
@@ -116,7 +125,12 @@ def process_folder(
 ):
     for src_folder in Path(local_root_folder).iterdir():
         if src_folder.is_dir() and (
-            sub_folder := should_process(local_root_folder, src_folder)
+            sub_folder := should_process(
+                local_root_folder,
+                src_folder,
+                len([file for file in src_folder.rglob("**/*.dcm")])
+                + len([file for file in src_folder.rglob("**/*.DCM")]),
+            )
         ):
             try:
                 sub_folder = SubFolder.update_status(
@@ -165,7 +179,6 @@ def process_folder(
                 )
 
 
-
 def execute():
     model_path = "models/resnet18_best.keras"
     with open("workers/parent_folders.yml", "r") as f:
@@ -176,11 +189,10 @@ def execute():
 
     labels_config = {int(k): v for k, v in labels_config.items()}
 
-
     for root_folder in config["root_folders"]:
         local_root_folder = root_folder["local"]
         remote_root_folder = root_folder["remote"]
-        remote_template = root_folder['remote_template']
+        remote_template = root_folder["remote_template"]
 
         process_folder(
             local_root_folder=local_root_folder,
