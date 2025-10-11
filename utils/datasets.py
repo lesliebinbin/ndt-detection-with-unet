@@ -41,7 +41,6 @@ def _preprocess_image_and_mask(img, mask, target_size=None, transform=None):
     if target_size is not None:
         img, mask = keras.ops.image.resize(
             keras.ops.array([img, mask]), size=target_size, pad_to_aspect_ratio=True
-            keras.ops.array([img, mask]), size=target_size, pad_to_aspect_ratio=True
         )
     return img, mask
 
@@ -285,7 +284,6 @@ def create_mask_dataset(
     input_shape=(512, 512, 1),
     train: bool = False,
     transforms=None,
-    transforms=None,
 ):
     if isinstance(img_folder, str):
         img_folder = Path(img_folder)
@@ -310,34 +308,31 @@ def create_mask_dataset(
                 origin_img, origin_mask, target_size=(input_height, input_width)
             )
 
-            if train and transforms:
-                for transform in transforms:
+            if train:
+                extra_to_yield = [
+                    (
+                        origin_img[:, ::-1, :],
+                        origin_mask[:, ::-1, :],
+                    ),
+                    (
+                        origin_img[::-1, :, :],
+                        origin_mask[::-1, :, :],
+                    ),
+                    (
+                        origin_img[::-1, ::-1, :],
+                        origin_mask[::-1, ::-1, :],
+                    ),
+                ]
+                for extra_img, extra_mask in extra_to_yield:
                     yield _preprocess_image_and_mask(
-                        origin_img,
-                        origin_mask,
+                        extra_img,
+                        extra_mask,
                         target_size=(input_height, input_width),
-                        transform=transform,
                     )
-                    extra_to_yield = [
-                        (
-                            origin_img[:, ::-1, :],
-                            origin_mask[:, ::-1, :],
-                        ),
-                        (
-                            origin_img[::-1, :, :],
-                            origin_mask[::-1, :, :],
-                        ),
-                        (
-                            origin_img[::-1, ::-1, :],
-                            origin_mask[::-1, ::-1, :],
-                        ),
-                    ]
+
+                for transform in transforms or []:
+                    extra_to_yield = [(origin_img, origin_mask), *extra_to_yield]
                     for extra_img, extra_mask in extra_to_yield:
-                        yield _preprocess_image_and_mask(
-                            extra_img,
-                            extra_mask,
-                            target_size=(input_height, input_width),
-                        )
                         yield _preprocess_image_and_mask(
                             extra_img,
                             extra_mask,
