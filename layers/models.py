@@ -1,4 +1,5 @@
 import keras
+import tensorflow as tf
 
 
 def __encoder_block(inputs, num_filters, use_batch_norm=False, kernel_size=3):
@@ -293,4 +294,51 @@ def unet_model(
     )(x)
 
     model = keras.Model(inputs=inputs, outputs=outputs, name="UNet_PrePoolSkips")
+    return model
+
+
+def _process_with_sequence(inputs):
+    dense_tensor = inputs.to_tensor()
+    row_lengths = inputs.row_lengths()
+    sequence_mask = tf.sequence_mask(row_lengths, tf.shape(dense_tensor)[1])
+    return dense_tensor, sequence_mask
+
+
+def cnn_lstm_backbone(height=512, width=512, in_channels=3, cnn_backbone=None):
+    frame_shape = (height, width, in_channels)
+    inputs = keras.Input(shape=[None, *frame_shape])
+    if cnn_backbone is not None:
+        cnn_extractor = keras.Sequential(
+            [cnn_backbone, keras.layers.GlobalAveragePooling2D()]
+        )
+    else:
+        cnn_extractor = keras.Sequential(
+            [
+                keras.layers.Conv2D(32, (3, 3), activation="relu", padding="same"),
+                keras.layers.MaxPooling2D((2, 2)),
+                keras.layers.Conv2D(64, (3, 3), activation="relu", padding="same"),
+                keras.layers.MaxPooling2D((2, 2)),
+                keras.layers.Conv2D(128, (3, 3), activation="relu", padding="same"),
+                keras.layers.GlobalAveragePooling2D(),
+            ]
+        )
+    video_input_tensor, sequence_mask = keras.layers.Lambda(
+        _process_with_sequence, output_shape=((None, *frame_shape), (None,))
+    )(inputs)
+
+    cnn_features = keras.layers.TimeDistributed(keras.layers.Lambda(cnn_extractor))(
+        video_input_tensor
+    )
+
+    lstm_out = keras.layers.LSTM(
+        128, return_sequences=True, recurrent_dropout=0.2, dropout=0.5
+    )(
+        cnn_features,
+        mask=sequence_mask,
+    )
+    lstm_out = keras.layers.LSTM(
+        64, recurrent_dropout=0.2, dropout=0.5, return_sequences=True
+    )(lstm_out)
+    outputs = keras.layers.LSTM(64, recurrent_dropout=0.2, dropout=0.5)(lstm_out)
+    model = keras.Model(inputs=inputs, outputs=outputs)
     return model

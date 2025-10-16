@@ -2,7 +2,7 @@ import keras
 import numpy as np
 import keras_hub
 from .backbones import UnetBackbone
-from .models import unet_model
+from .models import unet_model, cnn_lstm_backbone
 
 # ECA实例
 @keras.saving.register_keras_serializable()
