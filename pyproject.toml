@@ -14,7 +14,7 @@ dependencies = [
     "tqdm",
     "tensorboard",
     "keras",
-    "keras-hub",
+    "keras-hub==0.22.2",
     "scikit-learn",
     "scikit-image",
     "seaborn",
@@ -28,7 +28,7 @@ dependencies = [
     "moviepy",
     "opencv-python",
     "opencv-contrib-python",
-
+    "pydot",
 ]
 
 [tool.uv.sources]
