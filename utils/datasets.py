@@ -443,3 +443,83 @@ def create_images_dataset(
             tf.TensorSpec(shape=(len(class_names),), name="label", dtype=tf.int32),
         ),
     )
+
+
+
+def transcript_dataset(
+    charset: str,
+    img_folder,
+    label_folder,
+    transcript_folder,
+    sequence_length,
+    img_size=(256, 256),
+    train=False,
+):
+    if isinstance(img_folder, str):
+        img_folder = Path(img_folder)
+    if isinstance(label_folder, str):
+        label_folder = Path(label_folder)
+    if isinstance(transcript_folder, str):
+        transcript_folder = Path(transcript_folder)
+
+    def transcript_gen():
+        for img_file in img_folder.iterdir():
+            label_file = label_folder / img_file.with_suffix(".txt").name
+            if not label_file.exists():
+                continue
+            transcript_file = transcript_folder / img_file.with_suffix(".txt").name
+            img = cv2.imread(img_file)
+            height, width = img.shape[:-1]
+            labels = label_file.read_text().strip().split("\n")
+            transcripts = transcript_file.read_text().strip().split("\n")
+            for label, transcript in zip(labels, transcripts):
+                _cls, x, y, w, h = list(map(float, label.split(" ")))
+                min_x, min_y, max_x, max_y = x - w / 2, y - h / 2, x + w / 2, y + h / 2
+                min_x, min_y, max_x, max_y = (
+                    int(width * min_x),
+                    int(height * min_y),
+                    int(width * max_x),
+                    int(height * max_y),
+                )
+                cropped_img = img[min_y:max_y, min_x:max_x, :]
+                width = cropped_img.shape[1]
+                cropped_img = cropped_img[:, int(width/4):, :]
+                images = []
+                all_labels = []
+                images.append(cropped_img)
+                # transcript = f" {transcript} "
+                chars = list(transcript)
+                chars_index = np.array([charset.index(char) for char in chars])
+                chars_index += 1
+                label_length = len(chars_index)
+                padded_labels = np.zeros(shape=(sequence_length,))
+                padded_labels[:label_length] = chars_index
+                all_labels.append(padded_labels)
+                if train:
+                    images.append(
+                        keras.layers.RandomBrightness(factor=0.2)(cropped_img)
+                    )
+                    all_labels.append(padded_labels)
+                    images.append(keras.layers.RandomContrast(factor=0.2)(cropped_img))
+                    all_labels.append(padded_labels)
+                    images.append(
+                        keras.layers.RandomGaussianBlur(factor=0.2)(cropped_img)
+                    )
+                    all_labels.append(padded_labels)
+                images = keras.ops.array(images)
+                images = keras.ops.image.resize(
+                    images, size=img_size,
+                      pad_to_aspect_ratio=True, fill_value=255.0
+                )
+                for img, p_labels in zip(images, all_labels):
+                    yield img, p_labels
+
+    return tf.data.Dataset.from_generator(
+        transcript_gen,
+        output_signature=(
+            tf.TensorSpec(shape=(*img_size, 3), name="cropped_img", dtype=tf.float32),
+            tf.TensorSpec(
+                shape=(sequence_length,), dtype=tf.int32, name="padded_labels"
+            ),
+        ),
+    )
