@@ -292,6 +292,13 @@ def create_mask_dataset(
 
     def my_generator():
         input_height, input_width, _channel = input_shape
+        preprocess_img_and_mask_no_transform = (
+            lambda img_mask: _preprocess_image_and_mask(
+                img_mask[0],
+                img_mask[1],
+                target_size=(input_height, input_width),
+            )
+        )
 
         for img_file in img_folder.iterdir():
             mask_file = mask_folder / img_file.relative_to(img_folder)
@@ -304,44 +311,50 @@ def create_mask_dataset(
             )
             origin_img = keras.ops.expand_dims(origin_img, axis=-1)
             origin_mask = keras.ops.expand_dims(origin_mask, axis=-1)
-            yield _preprocess_image_and_mask(
-                origin_img, origin_mask, target_size=(input_height, input_width)
-            )
+            yield preprocess_img_and_mask_no_transform((origin_img, origin_mask))
 
-            if train and transforms:
-                for transform in transforms:
-                    yield _preprocess_image_and_mask(
-                        origin_img,
-                        origin_mask,
-                        target_size=(input_height, input_width),
-                        transform=transform,
-                    )
-                    extra_to_yield = [
-                        (
-                            origin_img[:, ::-1, :],
-                            origin_mask[:, ::-1, :],
-                        ),
-                        (
-                            origin_img[::-1, :, :],
-                            origin_mask[::-1, :, :],
-                        ),
-                        (
-                            origin_img[::-1, ::-1, :],
-                            origin_mask[::-1, ::-1, :],
-                        ),
-                    ]
-                    for extra_img, extra_mask in extra_to_yield:
-                        yield _preprocess_image_and_mask(
-                            extra_img,
-                            extra_mask,
-                            target_size=(input_height, input_width),
-                        )
-                        yield _preprocess_image_and_mask(
-                            extra_img,
-                            extra_mask,
-                            target_size=(input_height, input_width),
-                            transform=transform,
-                        )
+            # if train:
+            #     extra_to_yield = [
+            #         (
+            #             origin_img[:, ::-1, :],
+            #             origin_mask[:, ::-1, :],
+            #         ),
+            #         (
+            #             origin_img[::-1, :, :],
+            #             origin_mask[::-1, :, :],
+            #         ),
+            #         (
+            #             origin_img[::-1, ::-1, :],
+            #             origin_mask[::-1, ::-1, :],
+            #         ),
+            #     ]
+            #     yield from map(preprocess_img_and_mask_no_transform, extra_to_yield)
+
+            #     if not transforms:
+            #         continue
+            #     imgs_and_masks_to_transform = [
+            #         (origin_img, origin_mask),
+            #         (
+            #             origin_img[:, ::-1, :],
+            #             origin_mask[:, ::-1, :],
+            #         ),
+            #         (
+            #             origin_img[::-1, :, :],
+            #             origin_mask[::-1, :, :],
+            #         ),
+            #         (
+            #             origin_img[::-1, ::-1, :],
+            #             origin_mask[::-1, ::-1, :],
+            #         ),
+            #     ]
+            #     for transform in transforms:
+            #         transform_func = lambda img_mask: _preprocess_image_and_mask(
+            #             img_mask[0],
+            #             img_mask[1],
+            #             target_size=(input_height, input_width),
+            #             transform=transform,
+            #         )
+            #         yield from map(transform_func, imgs_and_masks_to_transform)
 
     return tf.data.Dataset.from_generator(
         my_generator,

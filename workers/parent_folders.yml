@@ -1,0 +1,10 @@
+root_folders:
+  - local: "/mnt/c/Users/dsp/BASF/Jimmy WANG - Hua An scanned film/production_folder"
+    remote: "/personal/wangj315_basfad_basf_net/Documents/Desktop/PPT/IP - Patent/Hua An scanned film/production_folder"
+    remote_template: "https://basf-my.sharepoint.com/shared?id={prefix}/{filepath}&parent={prefix}/{parent_folder}"
+  - local: "/mnt/c/Users/dsp/BASF/Jimmy WANG - Malaysia GD Production folder"
+    remote: "/personal/wangj315_basfad_basf_net/Documents/Malaysia GD Production folder"
+    remote_template: "https://basf-my.sharepoint.com/shared?id={prefix}/{filepath}&parent={prefix}/{parent_folder}"
+  - local: "/mnt/c/Users/dsp/BASF/Artificial Intelligence powered inspection - Sample Test"
+    remote: "/sites/nde-ai/Sample Test"
+    remote_template: "https://basf.sharepoint.com/sites/nde-ai/Sample Test?id={prefix}/{filepath}&parent={prefix}/{parent_folder}"

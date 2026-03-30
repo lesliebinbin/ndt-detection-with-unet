@@ -9,8 +9,8 @@ import os
 os.environ["KERAS_BACKEND"] = "jax"
 import keras
 
-keras.mixed_precision.set_global_policy("mixed_float16")
-from layers import UnetBackbone
+# keras.mixed_precision.set_global_policy("mixed_float16")
+from layers import UnetBackbone, unet_model
 import numpy as np
 import io
 import numpy as np
@@ -34,7 +34,9 @@ def cosine_annealing_scheduler(epoch, lr):
 
 import numpy as np
 from utils import (
+    create_replicated_img_dataset,
     create_mask_dataset,
+    create_mask_slices_dataset,
     iou_coef,
     dice_coef,
     bfce_dice_loss,
@@ -42,93 +44,94 @@ from utils import (
 
 
 # Load datasets using Keras utilities
-batch_size = 8
+batch_size = 16
 
-img_size = (1920 // 2, 1920 // 2)
-input_shape = (1920 // 2, 1920 // 2, 1)
+img_size = (512, 512)
+input_shape = (512, 512, 1)
 
 
 class PlotMaskCallback(keras.callbacks.Callback):
-    def __init__(self, val_ds, log_dir="logs"):
+    def __init__(self, val_ds, log_dir="logs", max_output=4):
         super().__init__()
         self.file_writer = tf.summary.create_file_writer(f"{log_dir}/masks")
         self.val_ds = val_ds
+        self.max_output = max_output
 
     def on_epoch_end(self, epoch, logs=None):
         # Log both images to TensorBoard
         with self.file_writer.as_default():
-            for batch_index, (images, masks) in enumerate(
-                self.val_ds.shuffle(buffer_size=8).take(1)
+            for images, masks in (
+                self.val_ds.batch(self.max_output)
+                .shuffle(buffer_size=self.max_output * 2)
+                .take(1)
             ):
                 pred_masks = self.model.predict(images)
                 tf.summary.image(
-                    f"Image - {batch_index}", images / 255.0, step=epoch, max_outputs=4
+                    "Image",
+                    images / 255.0,
+                    step=epoch,
+                    max_outputs=self.max_output,
                 )
                 tf.summary.image(
-                    f"Mask - {batch_index}", masks, step=epoch, max_outputs=4
+                    "Mask",
+                    masks,
+                    step=epoch,
+                    max_outputs=self.max_output,
                 )
                 tf.summary.image(
-                    f"Predicted Mask - {batch_index}",
+                    "Predicted Mask",
                     pred_masks,
                     step=epoch,
-                    max_outputs=4,
+                    max_outputs=self.max_output,
                 )
 
 
 train_ds = create_mask_dataset(
-    img_folder="bubble_masks/train/images",
-    mask_folder="bubble_masks/train/masks",
+    img_folder="undercut_obb/train/images",
+    mask_folder="undercut_obb/train/masks",
     input_shape=input_shape,
     train=True,
+    # transforms=[
+    #     keras.layers.RandomRotation(0.25),
+    #     keras.layers.RandomErasing(fill_value=0),
+    # ],
 )
-val_ds = create_mask_dataset(
-    img_folder="bubble_masks/val/images",
-    mask_folder="bubble_masks/val/masks",
+origin_val_ds = create_mask_dataset(
+    img_folder="undercut_obb/valid/images",
+    mask_folder="undercut_obb/valid/masks",
     input_shape=input_shape,
 )
-train_ds = (
-    train_ds.shuffle(buffer_size=100, seed=100)
-    .batch(batch_size)
-    .prefetch(tf.data.AUTOTUNE)
-)
-val_ds = val_ds.batch(batch_size)
+train_ds = train_ds.batch(batch_size)
+val_ds = origin_val_ds.batch(batch_size)
 callbacks = [
     keras.callbacks.ModelCheckpoint(
         filepath="models/unet_semantic_seg_best_loss.keras",
         save_best_only=True,
         monitor="val_loss",
     ),
-    keras.callbacks.EarlyStopping(monitor="val_loss", patience=int(epochs / 6)),
+    keras.callbacks.EarlyStopping(monitor="val_loss", patience=100),
     keras.callbacks.TensorBoard(log_dir="logs"),
     # keras.callbacks.LearningRateScheduler(cosine_annealing_scheduler, verbose=1),
-    PlotMaskCallback(val_ds=val_ds),
+    PlotMaskCallback(val_ds=origin_val_ds, log_dir="logs", max_output=8),
 ]
 
 
 # In[ ]:
 
 
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-# model = keras.Sequential(
-#     [
-#         keras.Input(input_shape),
-#         keras.layers.Rescaling(1.0 / 255),
-#         UnetBackbone(general_filters=[32, 64, 128], dropout=0.5),
-#         keras.layers.Conv2D(1, kernel_size=3, activation="sigmoid", padding="same"),
-#     ]
-# )
-model = keras.models.load_model('unet_ss_best.keras', compile=False)
+model = keras.Sequential(
+    [
+        keras.Input(input_shape),
+        keras.layers.Rescaling(1.0 / 255),
+        unet_model(
+            input_shape=input_shape,
+            depth=4,
+            initial_filter=32,
+            use_batch_norm=True,
+        ),
+    ]
+)
+# model = keras.models.load_model('unet_ss_undercut.keras', compile=False)
 model.summary()
 
 

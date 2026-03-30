@@ -143,6 +143,9 @@ def process_folder(
                     labels_config=labels_config,
                     callback=callback,
                 )
+                if result is None and filtered_rows is None:
+                    print(f"Skip {src_folder.absolute()} since it is empty")
+                    continue
                 result = generate_remote_url(
                     result,
                     remote_template=remote_template,

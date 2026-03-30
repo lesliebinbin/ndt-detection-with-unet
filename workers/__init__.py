@@ -31,6 +31,8 @@ def process_dicom_images(src_folder: Path, model_path: Path, labels_config, call
     model = eval_model(model_path)
     final_df = pd.DataFrame()
     for index, batch_dcm in enumerate(imgs_generator(src_folder)):
+        if not batch_dcm:
+            return None, None
         file_labels = []
         result = load_dcm_into_slices(batch_dcm)
         imgs = [img for (_, img) in result]
