@@ -28,11 +28,12 @@ dependencies = [
     "moviepy",
     "opencv-python",
     "opencv-contrib-python",
-
+    "tifffile",
 ]
 
 [tool.uv.sources]
 pydicom = [{ index = "simple" }]
+tifffile = [{ index = "simple" }]
 pycogpg2-binary = [{ index = "simple" }]
 apscheduler = [{ index = "simple" }]
 sqlalchemy = [{ index = "simple" }]

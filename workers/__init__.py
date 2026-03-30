@@ -1,6 +1,7 @@
 from pathlib import Path
 import numpy as np
 from pydicom import dcmread
+import tifffile as tiff
 from PIL import Image
 import keras
 import pandas as pd
@@ -9,7 +10,7 @@ import pandas as pd
 def imgs_generator(src_folder: Path, batch_size=64):
     batch = []
     for file in src_folder.rglob("*"):
-        if file.is_file() and file.suffix.lower() == ".dcm":
+        if file.is_file() and file.suffix.lower() in (".dcm", "tif"):
             batch.append(file)
             if len(batch) == batch_size:
                 yield batch
@@ -27,14 +28,16 @@ def label_agg_func(labels):
         return ";".join([label for label in labels if label not in valid_tags])
 
 
-def process_dicom_images(src_folder: Path, model_path: Path, labels_config, callback):
+def process_dicom_or_tif_images(
+    src_folder: Path, model_path: Path, labels_config, callback
+):
     model = eval_model(model_path)
     final_df = pd.DataFrame()
     for index, batch_dcm in enumerate(imgs_generator(src_folder)):
         if not batch_dcm:
             return None, None
         file_labels = []
-        result = load_dcm_into_slices(batch_dcm)
+        result = load_dcm_or_tiff_into_slices(batch_dcm)
         imgs = [img for (_, img) in result]
         files = [file for (file, _) in result]
         imgs = np.array(imgs)
@@ -77,14 +80,18 @@ def img_process(img_array):
     return imgs
 
 
-def load_dcm_into_slices(dcm_paths: Path) -> np.array:
+def load_dcm_or_tiff_into_slices(image_paths: list[Path]) -> np.array:
     result = []
-    for dcm_path in dcm_paths:
-        img_array = dcmread(dcm_path).pixel_array
+    for image_path in image_paths:
+        img_array = (
+            dcmread(image_path).pixel_array
+            if image_path.suffix.lower() == ".dcm"
+            else tiff.imread(image_path)
+        )
         img_array = (img_array / img_array.max()) * 255.0
         img_array = img_array.astype("uint8")
         for img in img_process(img_array):
-            result.append((dcm_path, img))
+            result.append((image_path, img))
     return result
 
 
@@ -113,4 +120,12 @@ def aggregate_batches(src_folder: Path, batch_prefix: str, result_filename=None)
     return df
 
 
-from .models import RootFolder, SubFolder, Sess, engine, Base, WorkStatus, ClassificationResult
+from .models import (
+    RootFolder,
+    SubFolder,
+    Sess,
+    engine,
+    Base,
+    WorkStatus,
+    ClassificationResult,
+)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 os.environ["KERAS_BACKEND"] = "jax"
 from workers import (
-    process_dicom_images,
+    process_dicom_or_tif_images,
     aggregate_batches,
     Sess,
     engine,
@@ -129,7 +129,9 @@ def process_folder(
                 local_root_folder,
                 src_folder,
                 len([file for file in src_folder.rglob("**/*.dcm")])
-                + len([file for file in src_folder.rglob("**/*.DCM")]),
+                + len([file for file in src_folder.rglob("**/*.DCM")])
+                + len([file for file in src_folder.rglob("**/*.tif")])
+                + len([file for file in src_folder.rglob("**/*.TIF")]),
             )
         ):
             try:
@@ -137,7 +139,7 @@ def process_folder(
                     sub_folder, Sess, WorkStatus.ONGOING
                 )
                 print(f"Processing: {src_folder.absolute()}")
-                result, filtered_rows = process_dicom_images(
+                result, filtered_rows = process_dicom_or_tif_images(
                     src_folder=src_folder,
                     model_path=model_path,
                     labels_config=labels_config,
