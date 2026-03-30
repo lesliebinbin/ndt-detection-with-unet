@@ -10,7 +10,7 @@ import pandas as pd
 def imgs_generator(src_folder: Path, batch_size=64):
     batch = []
     for file in src_folder.rglob("*"):
-        if file.is_file() and file.suffix.lower() in (".dcm", "tif"):
+        if file.is_file() and file.suffix.lower() in (".dcm", ".tif"):
             batch.append(file)
             if len(batch) == batch_size:
                 yield batch
